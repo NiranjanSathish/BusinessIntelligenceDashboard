@@ -69,6 +69,14 @@ from multichart import (
     export_all_dashboard_charts,
     get_dashboard_summary
 )
+from transformations import (
+    create_calculated_column,
+    extract_date_components,
+    bin_numerical_column,
+    text_transformation,
+    fill_missing_values,
+    get_transformation_summary
+)
 
 
 def handle_file_upload(file):
@@ -996,6 +1004,140 @@ def create_dashboard():
                 
                 # Store current insights
                 current_insights_state = gr.State(value=None)
+
+            # ==================== TAB 2: DATA TRANSFORMATION ====================
+            with gr.Tab("🔧 Transform Data"):
+                gr.Markdown("""
+                ### 🔧 Data Transformation
+                Create new columns, extract date features, and transform your data.
+                """)
+                
+                with gr.Row():
+                    transformation_summary = gr.Markdown("*No transformations applied*")
+                
+                gr.Markdown("---")
+                
+                # Transformation Type Selector
+                with gr.Row():
+                    transform_type = gr.Dropdown(
+                        label="Select Transformation Type",
+                        choices=[
+                            "Calculate New Column",
+                            "Extract Date Components",
+                            "Bin Numerical Data",
+                            "Text Operations",
+                            "Fill Missing Values"
+                        ],
+                        value="Calculate New Column",
+                        interactive=True
+                    )
+                
+                gr.Markdown("---")
+                
+                # Calculate New Column Section
+                with gr.Group(visible=True) as calc_group:
+                    gr.Markdown("#### ➕ Calculate New Column")
+                    gr.Markdown("*Create a new column by combining two existing numerical columns*")
+                    
+                    with gr.Row():
+                        calc_new_name = gr.Textbox(label="New Column Name", placeholder="e.g., Total_Revenue")
+                        calc_col1 = gr.Dropdown(label="Column 1", choices=["None"], value="None")
+                        calc_operation = gr.Dropdown(label="Operation", choices=["+", "-", "*", "/"], value="+")
+                        calc_col2 = gr.Dropdown(label="Column 2", choices=["None"], value="None")
+                    
+                    calc_btn = gr.Button("➕ Create Column", variant="primary")
+                
+                # Extract Date Components Section
+                with gr.Group(visible=False) as date_group:
+                    gr.Markdown("#### 📅 Extract Date Components")
+                    gr.Markdown("*Extract year, month, day, etc. from datetime columns*")
+                    
+                    with gr.Row():
+                        date_col_select = gr.Dropdown(label="Date Column", choices=["None"], value="None")
+                        date_components = gr.CheckboxGroup(
+                            label="Components to Extract",
+                            choices=["Year", "Month", "Day", "Quarter", "Weekday", "Week"],
+                            value=["Year", "Month"]
+                        )
+                    
+                    extract_btn = gr.Button("📅 Extract Components", variant="primary")
+                
+                # Bin Numerical Data Section
+                with gr.Group(visible=False) as bin_group:
+                    gr.Markdown("#### 📊 Bin Numerical Data")
+                    gr.Markdown("*Group numerical values into ranges (e.g., age groups, price tiers)*")
+                    
+                    with gr.Row():
+                        bin_col_select = gr.Dropdown(label="Column to Bin", choices=["None"], value="None")
+                        bin_num_bins = gr.Slider(label="Number of Bins", minimum=2, maximum=10, value=5, step=1)
+                    
+                    with gr.Row():
+                        bin_new_name = gr.Textbox(label="New Column Name", placeholder="e.g., Age_Group")
+                        bin_labels = gr.Textbox(
+                            label="Bin Labels (comma-separated, or 'auto')",
+                            placeholder="e.g., Low,Medium,High or auto",
+                            value="auto"
+                        )
+                    
+                    bin_btn = gr.Button("📊 Create Bins", variant="primary")
+                
+                # Text Operations Section
+                with gr.Group(visible=False) as text_group:
+                    gr.Markdown("#### 🔤 Text Operations")
+                    gr.Markdown("*Transform text data (uppercase, lowercase, etc.)*")
+                    
+                    with gr.Row():
+                        text_col_select = gr.Dropdown(label="Column", choices=["None"], value="None")
+                        text_operation = gr.Dropdown(
+                            label="Operation",
+                            choices=["uppercase", "lowercase", "title", "trim"],
+                            value="uppercase"
+                        )
+                        text_new_name = gr.Textbox(label="New Column Name (optional)", placeholder="Leave empty to modify in-place")
+                    
+                    text_btn = gr.Button("🔤 Apply Text Transform", variant="primary")
+                
+                # Fill Missing Values Section
+                with gr.Group(visible=False) as fill_group:
+                    gr.Markdown("#### 🔧 Fill Missing Values")
+                    gr.Markdown("*Replace missing values with calculated or specified values*")
+                    
+                    with gr.Row():
+                        fill_col_select = gr.Dropdown(label="Column", choices=["None"], value="None")
+                        fill_method = gr.Dropdown(
+                            label="Method",
+                            choices=["mean", "median", "mode", "forward_fill", "backward_fill", "constant"],
+                            value="mean"
+                        )
+                        fill_value = gr.Textbox(label="Fill Value (for 'constant' method)", placeholder="e.g., 0")
+                    
+                    fill_btn = gr.Button("🔧 Fill Missing", variant="primary")
+                
+                gr.Markdown("---")
+                
+                # Transformation status and preview
+                with gr.Row():
+                    transform_status = gr.Textbox(label="Status", interactive=False, value="")
+                
+                with gr.Row():
+                    with gr.Column():
+                        gr.Markdown("### 👁️ Preview (First 10 Rows)")
+                        transform_preview = gr.Dataframe(label="Before → After", interactive=False)
+                
+                gr.Markdown("---")
+                
+                # Actions
+                with gr.Row():
+                    apply_transform_btn = gr.Button("✅ Apply Transformation", variant="primary", size="lg")
+                    undo_transform_btn = gr.Button("↩️ Undo Last", variant="secondary", size="lg")
+                    download_transformed_btn = gr.Button("💾 Download Transformed Data", variant="secondary", size="lg")
+                
+                with gr.Row():
+                    transformed_download = gr.File(label="Download CSV", visible=False)
+                
+                # States for transformation
+                transformed_df_state = gr.State(value=None)
+                original_df_backup = gr.State(value=None)
         
         # ==================== EVENT HANDLERS ====================
         
@@ -1420,6 +1562,234 @@ def create_dashboard():
             inputs=[current_insights_state],
             outputs=[insights_download, insights_export_status, insights_download]
         )
+
+        # ==================== TRANSFORMATION EVENT HANDLERS ====================
+        
+
+        # Show/hide transformation groups based on selected type
+        def update_transform_ui(transform_type):
+            """Show only the relevant transformation group."""
+            calc_vis = transform_type == "Calculate New Column"
+            date_vis = transform_type == "Extract Date Components"
+            bin_vis = transform_type == "Bin Numerical Data"
+            text_vis = transform_type == "Text Operations"
+            fill_vis = transform_type == "Fill Missing Values"
+            
+            return (
+                gr.update(visible=calc_vis),
+                gr.update(visible=date_vis),
+                gr.update(visible=bin_vis),
+                gr.update(visible=text_vis),
+                gr.update(visible=fill_vis)
+            )
+        
+        transform_type.change(
+            fn=update_transform_ui,
+            inputs=[transform_type],
+            outputs=[calc_group, date_group, bin_group, text_group, fill_group]
+        )
+        
+        # Populate column dropdowns when data is uploaded
+        def populate_transform_dropdowns(df):
+            """Populate dropdowns with column names."""
+            if df is None or df.empty:
+                return (
+                    gr.update(choices=["None"]),
+                    gr.update(choices=["None"]),
+                    gr.update(choices=["None"]),
+                    gr.update(choices=["None"]),
+                    gr.update(choices=["None"]),
+                    gr.update(choices=["None"])  # 6th output
+                )
+            
+            col_types = detect_column_types(df)
+            num_cols = ["None"] + col_types.get('numerical', [])
+            date_cols = ["None"] + col_types.get('datetime', [])
+            all_cols = ["None"] + list(df.columns)
+            
+            return (
+                gr.update(choices=num_cols),   # calc_col1
+                gr.update(choices=num_cols),   # calc_col2
+                gr.update(choices=date_cols),  # date_col_select
+                gr.update(choices=num_cols),   # bin_col_select
+                gr.update(choices=all_cols),   # text_col_select
+                gr.update(choices=all_cols)    # fill_col_select (6th output)
+            )
+        
+        # Trigger when file is uploaded (add to upload_btn.click outputs)
+        # We'll manually call this after upload
+        
+        # Calculate New Column
+        def preview_calculated_column(df, new_name, col1, op, col2):
+            """Preview calculated column before applying."""
+            if df is None:
+                return None, "⚠️ No data available", pd.DataFrame()
+            
+            temp_df, msg = create_calculated_column(df, new_name, col1, op, col2)
+            
+            if temp_df is not None:
+                # Show preview
+                preview = temp_df[[col1, col2, new_name]].head(10)
+                return temp_df, msg, preview
+            else:
+                return None, msg, pd.DataFrame()
+        
+        calc_btn.click(
+            fn=preview_calculated_column,
+            inputs=[df_state, calc_new_name, calc_col1, calc_operation, calc_col2],
+            outputs=[transformed_df_state, transform_status, transform_preview]
+        )
+        
+        # Extract Date Components
+        def preview_date_extraction(df, date_col, components):
+            """Preview date component extraction."""
+            if df is None:
+                return None, "⚠️ No data available", pd.DataFrame()
+            
+            temp_df, msg = extract_date_components(df, date_col, components)
+            
+            if temp_df is not None:
+                # Show preview of original + new columns
+                new_cols = [c for c in temp_df.columns if c not in df.columns]
+                preview_cols = [date_col] + new_cols
+                preview = temp_df[preview_cols].head(10)
+                return temp_df, msg, preview
+            else:
+                return None, msg, pd.DataFrame()
+        
+        extract_btn.click(
+            fn=preview_date_extraction,
+            inputs=[df_state, date_col_select, date_components],
+            outputs=[transformed_df_state, transform_status, transform_preview]
+        )
+        
+        # Bin Numerical Data
+        def preview_binning(df, col, num_bins, labels, new_name):
+            """Preview binning operation."""
+            if df is None:
+                return None, "⚠️ No data available", pd.DataFrame()
+            
+            temp_df, msg = bin_numerical_column(df, col, int(num_bins), labels, new_name)
+            
+            if temp_df is not None:
+                # Show preview
+                bin_col_name = new_name if new_name else f"{col}_Binned"
+                preview = temp_df[[col, bin_col_name]].head(10)
+                return temp_df, msg, preview
+            else:
+                return None, msg, pd.DataFrame()
+        
+        bin_btn.click(
+            fn=preview_binning,
+            inputs=[df_state, bin_col_select, bin_num_bins, bin_labels, bin_new_name],
+            outputs=[transformed_df_state, transform_status, transform_preview]
+        )
+        
+        # Text Operations
+        def preview_text_transform(df, col, operation, new_name):
+            """Preview text transformation."""
+            if df is None:
+                return None, "⚠️ No data available", pd.DataFrame()
+            
+            temp_df, msg = text_transformation(df, col, operation, new_name if new_name else None)
+            
+            if temp_df is not None:
+                target_col = new_name if new_name else col
+                preview = pd.DataFrame({
+                    f'{col}_BEFORE': df[col].head(10),
+                    f'{target_col}_AFTER': temp_df[target_col].head(10)
+                })
+                return temp_df, msg, preview
+            else:
+                return None, msg, pd.DataFrame()
+        
+        text_btn.click(
+            fn=preview_text_transform,
+            inputs=[df_state, text_col_select, text_operation, text_new_name],
+            outputs=[transformed_df_state, transform_status, transform_preview]
+        )
+        
+        # Fill Missing Values
+        def preview_fill_missing(df, col, method, value):
+            """Preview missing value fill."""
+            if df is None:
+                return None, "⚠️ No data available", pd.DataFrame()
+            
+            temp_df, msg = fill_missing_values(df, col, method, value)
+            
+            if temp_df is not None:
+                # Show rows that had missing values
+                preview = pd.DataFrame({
+                    f'{col}_BEFORE': df[col].head(10),
+                    f'{col}_AFTER': temp_df[col].head(10)
+                })
+                return temp_df, msg, preview
+            else:
+                return None, msg, pd.DataFrame()
+        
+        fill_btn.click(
+            fn=preview_fill_missing,
+            inputs=[df_state, fill_col_select, fill_method, fill_value],
+            outputs=[transformed_df_state, transform_status, transform_preview]
+        )
+        
+        # Apply Transformation
+        def apply_transformation(original_df, transformed_df):
+            """Apply the previewed transformation to the main dataset."""
+            if transformed_df is None or transformed_df.empty:
+                return original_df, "⚠️ No transformation to apply. Create a transformation first.", original_df
+            
+            summary = get_transformation_summary(original_df, transformed_df)
+            
+            return transformed_df, "✅ Transformation applied successfully!", summary
+        
+        apply_transform_btn.click(
+            fn=apply_transformation,
+            inputs=[df_state, transformed_df_state],
+            outputs=[df_state, transform_status, transformation_summary]
+        )
+        
+        # Undo Transformation
+        def undo_transformation(backup_df):
+            """Undo last transformation."""
+            if backup_df is None:
+                return None, "⚠️ No backup available", ""
+            
+            return backup_df, "↩️ Transformation undone", "No transformations applied"
+        
+        undo_transform_btn.click(
+            fn=undo_transformation,
+            inputs=[original_df_backup],
+            outputs=[df_state, transform_status, transformation_summary]
+        )
+        
+        # Download Transformed Data
+        def download_transformed(df):
+            """Download the transformed dataset."""
+            if df is None or df.empty:
+                return None, "⚠️ No data to download", gr.update(visible=False)
+            
+            try:
+                file_path = export_dataframe_to_csv(df, "transformed_data.csv")
+                if file_path:
+                    return file_path, f"✅ Exported {len(df):,} rows with {df.shape[1]} columns", gr.update(visible=True, value=file_path)
+                else:
+                    return None, "❌ Export failed", gr.update(visible=False)
+            except Exception as e:
+                return None, f"❌ Error: {str(e)}", gr.update(visible=False)
+        
+        download_transformed_btn.click(
+            fn=download_transformed,
+            inputs=[df_state],
+            outputs=[transformed_download, transform_status, transformed_download]
+        )
+        
+        # Populate dropdowns when file is uploaded
+        upload_btn.click(
+            fn=populate_transform_dropdowns,
+            inputs=[df_state],
+            outputs=[calc_col1, calc_col2, date_col_select, bin_col_select, text_col_select, fill_col_select]
+        )
         
         # Footer
         gr.Markdown("""
@@ -1430,14 +1800,14 @@ def create_dashboard():
     return demo
 
 #For deployment
-# if __name__ == "__main__":
-#     # Create theme
-#     custom_theme = gr.themes.Glass(primary_hue="teal", secondary_hue="blue")
+if __name__ == "__main__":
+    # Create theme
+    custom_theme = gr.themes.Glass(primary_hue="teal", secondary_hue="blue")
     
-#     demo = create_dashboard()
-#     demo.launch(theme=custom_theme, ssr_mode=False)
+    demo = create_dashboard()
+    demo.launch(theme=custom_theme, ssr_mode=False)
 
 #For local testing
-if __name__ == "__main__":
-    demo = create_dashboard()
-    demo.launch(server_port=7866)
+# if __name__ == "__main__":
+#     demo = create_dashboard()
+#     demo.launch(server_port=7866)
