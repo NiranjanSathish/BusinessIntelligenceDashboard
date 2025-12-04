@@ -9,6 +9,9 @@ import warnings
 import asyncio
 import sys
 
+
+
+
 # Suppress warnings and fix asyncio issues
 warnings.filterwarnings('ignore')
 if sys.platform == 'linux':
@@ -58,6 +61,13 @@ from utils import (
     export_dataframe_to_csv,
     export_figure_to_png,
     export_text_to_file
+)
+from multichart import (
+    get_smart_chart_config,
+    generate_dashboard_chart,
+    generate_dashboard_chart_manual,
+    export_all_dashboard_charts,
+    get_dashboard_summary
 )
 
 
@@ -808,7 +818,134 @@ def create_dashboard():
                 # Store current chart
                 current_chart_state = gr.State(value=None)
             
-            # ==================== TAB 5: INSIGHTS ====================
+            # ==================== TAB 5: DASHBOARD VIEW ====================
+            with gr.Tab("📊 Multi Chart View"):
+                gr.Markdown("""
+                ### 📊 Multi-Chart Dashboard
+                View and configure multiple charts simultaneously for comprehensive analysis.
+                """)
+                
+                # Dashboard controls
+                with gr.Row():
+                    with gr.Column(scale=2):
+                        dashboard_summary = gr.Markdown()
+                    
+                    with gr.Column(scale=1):
+                        use_filtered_dashboard = gr.Checkbox(
+                            label="Use Filtered Data",
+                            value=False
+                        )
+                        
+                        auto_generate_btn = gr.Button(
+                            "🎯 Smart Dashboard (Auto)", 
+                            variant="primary",
+                            size="lg"
+                        )
+                        
+                        manual_generate_btn = gr.Button(
+                            "⚙️ Generate (Manual Config)",
+                            variant="secondary",
+                            size="lg"
+                        )
+                
+                gr.Markdown("---")
+                
+                # Chart 1 Configuration
+                gr.Markdown("### Chart 1 Settings")
+                with gr.Row():
+                    chart1_selector = gr.Dropdown(
+                        label="Chart Type",
+                        choices=get_available_chart_types(),
+                        value="Time Series",
+                        scale=1
+                    )
+                    chart1_col1 = gr.Dropdown(label="Column 1", choices=["None"], value="None", scale=1)
+                    chart1_col2 = gr.Dropdown(label="Column 2", choices=["None"], value="None", scale=1)
+                    chart1_col3 = gr.Dropdown(label="Column 3 / Agg", choices=["None"], value="None", scale=1)
+                
+                # Chart 2 Configuration
+                gr.Markdown("### Chart 2 Settings")
+                with gr.Row():
+                    chart2_selector = gr.Dropdown(
+                        label="Chart Type",
+                        choices=get_available_chart_types(),
+                        value="Bar Chart",
+                        scale=1
+                    )
+                    chart2_col1 = gr.Dropdown(label="Column 1", choices=["None"], value="None", scale=1)
+                    chart2_col2 = gr.Dropdown(label="Column 2", choices=["None"], value="None", scale=1)
+                    chart2_col3 = gr.Dropdown(label="Column 3 / Agg", choices=["None"], value="None", scale=1)
+                
+                # Chart 3 Configuration
+                gr.Markdown("### Chart 3 Settings")
+                with gr.Row():
+                    chart3_selector = gr.Dropdown(
+                        label="Chart Type",
+                        choices=get_available_chart_types(),
+                        value="Box Plot",
+                        scale=1
+                    )
+                    chart3_col1 = gr.Dropdown(label="Column 1", choices=["None"], value="None", scale=1)
+                    chart3_col2 = gr.Dropdown(label="Column 2", choices=["None"], value="None", scale=1)
+                    chart3_col3 = gr.Dropdown(label="Column 3 / Agg", choices=["None"], value="None", scale=1)
+                
+                # Chart 4 Configuration
+                gr.Markdown("### Chart 4 Settings")
+                with gr.Row():
+                    chart4_selector = gr.Dropdown(
+                        label="Chart Type",
+                        choices=get_available_chart_types(),
+                        value="Scatter Plot",
+                        scale=1
+                    )
+                    chart4_col1 = gr.Dropdown(label="Column 1", choices=["None"], value="None", scale=1)
+                    chart4_col2 = gr.Dropdown(label="Column 2", choices=["None"], value="None", scale=1)
+                    chart4_col3 = gr.Dropdown(label="Column 3 / Agg", choices=["None"], value="None", scale=1)
+                
+                gr.Markdown("---")
+                
+                # 2x2 Chart Grid
+                gr.Markdown("### Dashboard Charts")
+                with gr.Row():
+                    with gr.Column():
+                        dashboard_chart1 = gr.Plot(label="Chart 1", show_label=True)
+                    with gr.Column():
+                        dashboard_chart2 = gr.Plot(label="Chart 2", show_label=True)
+                
+                with gr.Row():
+                    with gr.Column():
+                        dashboard_chart3 = gr.Plot(label="Chart 3", show_label=True)
+                    with gr.Column():
+                        dashboard_chart4 = gr.Plot(label="Chart 4", show_label=True)
+                
+                gr.Markdown("---")
+                
+                # Export dashboard
+                with gr.Row():
+                    gr.Markdown("### 💾 Export All Charts")
+                
+                with gr.Row():
+                    export_all_charts_btn = gr.Button(
+                        "📥 Export All as ZIP",
+                        variant="secondary",
+                        size="lg"
+                    )
+                    export_dashboard_status = gr.Textbox(
+                        label="Export Status",
+                        interactive=False,
+                        value=""
+                    )
+                
+                with gr.Row():
+                    dashboard_zip_download = gr.File(label="Download ZIP", visible=False)
+                
+                # Store dashboard charts
+                dashboard_chart1_state = gr.State(value=None)
+                dashboard_chart2_state = gr.State(value=None)
+                dashboard_chart3_state = gr.State(value=None)
+                dashboard_chart4_state = gr.State(value=None)
+
+            # ==================== TAB 6: INSIGHTS ====================
             with gr.Tab("💡 Insights"):
                 gr.Markdown("""
                 ### 💡 Automated Insights & Analysis
@@ -1053,6 +1190,192 @@ def create_dashboard():
             inputs=[current_chart_state],
             outputs=[chart_download, chart_export_status, chart_download]
         )
+
+        # ==================== DASHBOARD VIEW EVENT HANDLERS ====================
+        
+        # Helper function to update column dropdowns based on chart type
+        def update_dashboard_columns(df, chart_type):
+            """Update column choices for a dashboard chart."""
+            if df is None or df.empty:
+                return (
+                    gr.update(choices=["None"], value="None", visible=False),
+                    gr.update(choices=["None"], value="None", visible=False),
+                    gr.update(choices=["None"], value="None", visible=False)
+                )
+            
+            col_types = detect_column_types(df)
+            num_cols = ["None"] + col_types.get('numerical', [])
+            cat_cols = ["None"] + col_types.get('categorical', [])
+            date_cols = ["None"] + col_types.get('datetime', [])
+            all_cols = ["None"] + list(df.columns)
+            agg_methods = get_aggregation_methods()
+            
+            if chart_type == 'Time Series':
+                return (
+                    gr.update(label="Date Column", choices=date_cols, value="None", visible=True),
+                    gr.update(label="Value Column", choices=num_cols, value="None", visible=True),
+                    gr.update(label="Aggregation", choices=agg_methods, value="sum", visible=True)
+                )
+            elif chart_type in ['Histogram', 'Box Plot']:
+                return (
+                    gr.update(label="Column", choices=num_cols, value="None", visible=True),
+                    gr.update(visible=False),
+                    gr.update(visible=False)
+                )
+            elif chart_type in ['Bar Chart', 'Pie Chart']:
+                return (
+                    gr.update(label="Category Column", choices=cat_cols, value="None", visible=True),
+                    gr.update(label="Value Column (Opt)", choices=num_cols, value="None", visible=True),
+                    gr.update(label="Aggregation", choices=agg_methods, value="count", visible=True)
+                )
+            elif chart_type == 'Scatter Plot':
+                return (
+                    gr.update(label="X Column", choices=num_cols, value="None", visible=True),
+                    gr.update(label="Y Column", choices=num_cols, value="None", visible=True),
+                    gr.update(label="Color By (Opt)", choices=all_cols, value="None", visible=True)
+                )
+            elif chart_type == 'Correlation Heatmap':
+                return (
+                    gr.update(visible=False),
+                    gr.update(visible=False),
+                    gr.update(visible=False)
+                )
+            
+            return (gr.update(visible=False), gr.update(visible=False), gr.update(visible=False))
+        
+        # Update column dropdowns when chart type changes for each chart
+        chart1_selector.change(
+            fn=lambda df, ct: update_dashboard_columns(df, ct),
+            inputs=[df_state, chart1_selector],
+            outputs=[chart1_col1, chart1_col2, chart1_col3]
+        )
+        
+        chart2_selector.change(
+            fn=lambda df, ct: update_dashboard_columns(df, ct),
+            inputs=[df_state, chart2_selector],
+            outputs=[chart2_col1, chart2_col2, chart2_col3]
+        )
+        
+        chart3_selector.change(
+            fn=lambda df, ct: update_dashboard_columns(df, ct),
+            inputs=[df_state, chart3_selector],
+            outputs=[chart3_col1, chart3_col2, chart3_col3]
+        )
+        
+        chart4_selector.change(
+            fn=lambda df, ct: update_dashboard_columns(df, ct),
+            inputs=[df_state, chart4_selector],
+            outputs=[chart4_col1, chart4_col2, chart4_col3]
+        )
+        
+        # Smart Auto-Generate Dashboard
+        def generate_smart_dashboard(df, filtered_df, use_filtered):
+            """Generate dashboard with smart chart selection and auto-populated columns."""
+            data_to_use = filtered_df if (use_filtered and filtered_df is not None and not filtered_df.empty) else df
+    
+            if data_to_use is None or data_to_use.empty:
+                from visualizations import create_empty_chart
+                empty = create_empty_chart("No data available")
+                return "", empty, empty, empty, empty, None, None, None, None
+        
+            from multichart import get_smart_chart_config, generate_dashboard_chart
+        
+            # Get smart configurations for each position
+            chart1_type, config1 = get_smart_chart_config(data_to_use, 1)
+            chart2_type, config2 = get_smart_chart_config(data_to_use, 2)
+            chart3_type, config3 = get_smart_chart_config(data_to_use, 3)
+            chart4_type, config4 = get_smart_chart_config(data_to_use, 4)
+        
+            # Generate all charts with smart configs
+            c1 = generate_dashboard_chart(data_to_use, chart1_type, config1)
+            c2 = generate_dashboard_chart(data_to_use, chart2_type, config2)
+            c3 = generate_dashboard_chart(data_to_use, chart3_type, config3)
+            c4 = generate_dashboard_chart(data_to_use, chart4_type, config4)
+        
+            summary = get_dashboard_summary(data_to_use)
+        
+            return summary, c1, c2, c3, c4, c1, c2, c3, c4  # Return charts twice: for display AND state
+        
+        auto_generate_btn.click(
+            fn=generate_smart_dashboard,
+            inputs=[df_state, filtered_df_state, use_filtered_dashboard],
+            outputs=[
+                dashboard_summary,
+                dashboard_chart1,
+                dashboard_chart2,
+                dashboard_chart3,
+                dashboard_chart4,
+                dashboard_chart1_state,  # ADD THESE
+                dashboard_chart2_state,
+                dashboard_chart3_state,
+                dashboard_chart4_state
+            ]
+        )
+        
+        # Manual Generate with Column Selection
+        def generate_manual_dashboard(df, filtered_df, use_filtered,
+                              c1_type, c1_1, c1_2, c1_3,
+                              c2_type, c2_1, c2_2, c2_3,
+                              c3_type, c3_1, c3_2, c3_3,
+                              c4_type, c4_1, c4_2, c4_3):
+            """Generate dashboard with manual column selections."""
+            data_to_use = filtered_df if (use_filtered and filtered_df is not None and not filtered_df.empty) else df
+    
+            if data_to_use is None or data_to_use.empty:
+                from visualizations import create_empty_chart
+                empty = create_empty_chart("No data available")
+                return "", empty, empty, empty, empty, None, None, None, None
+            
+            from multichart import generate_dashboard_chart_manual, get_dashboard_summary
+            
+            # Generate each chart with manual selections
+            c1 = generate_dashboard_chart_manual(data_to_use, c1_type, c1_1, c1_2, c1_3)
+            c2 = generate_dashboard_chart_manual(data_to_use, c2_type, c2_1, c2_2, c2_3)
+            c3 = generate_dashboard_chart_manual(data_to_use, c3_type, c3_1, c3_2, c3_3)
+            c4 = generate_dashboard_chart_manual(data_to_use, c4_type, c4_1, c4_2, c4_3)
+            
+            summary = get_dashboard_summary(data_to_use)
+            
+            return summary, c1, c2, c3, c4, c1, c2, c3, c4  # Return charts twice: for display AND state
+        
+        manual_generate_btn.click(
+            fn=generate_manual_dashboard,
+            inputs=[
+                df_state, filtered_df_state, use_filtered_dashboard,
+                chart1_selector, chart1_col1, chart1_col2, chart1_col3,
+                chart2_selector, chart2_col1, chart2_col2, chart2_col3,
+                chart3_selector, chart3_col1, chart3_col2, chart3_col3,
+                chart4_selector, chart4_col1, chart4_col2, chart4_col3
+            ],
+            outputs=[
+                dashboard_summary,
+                dashboard_chart1,
+                dashboard_chart2,
+                dashboard_chart3,
+                dashboard_chart4,
+                dashboard_chart1_state,  # ADD THESE
+                dashboard_chart2_state,
+                dashboard_chart3_state,
+                dashboard_chart4_state
+            ]
+        )
+        
+        # Export all dashboard charts
+        def export_dashboard(c1, c2, c3, c4):
+            """Export all 4 charts as ZIP."""
+            
+            zip_path, status = export_all_dashboard_charts(c1, c2, c3, c4)
+            
+            if zip_path:
+                return zip_path, status, gr.update(visible=True, value=zip_path)
+            else:
+                return None, status, gr.update(visible=False)
+        
+        export_all_charts_btn.click(
+            fn=export_dashboard,
+            inputs=[dashboard_chart1_state, dashboard_chart2_state, dashboard_chart3_state, dashboard_chart4_state],  # ✅ CORRECT - use state
+            outputs=[dashboard_zip_download, export_dashboard_status, dashboard_zip_download]
+        )
         
         # ==================== INSIGHTS EVENT HANDLERS ====================
         
@@ -1107,14 +1430,14 @@ def create_dashboard():
     return demo
 
 #For deployment
-if __name__ == "__main__":
-    # Create theme
-    custom_theme = gr.themes.Glass(primary_hue="teal", secondary_hue="blue")
+# if __name__ == "__main__":
+#     # Create theme
+#     custom_theme = gr.themes.Glass(primary_hue="teal", secondary_hue="blue")
     
-    demo = create_dashboard()
-    demo.launch(theme=custom_theme, ssr_mode=False)
+#     demo = create_dashboard()
+#     demo.launch(theme=custom_theme, ssr_mode=False)
 
 #For local testing
-# if __name__ == "__main__":
-#     demo = create_dashboard()
-#     demo.launch(server_port=7866)
+if __name__ == "__main__":
+    demo = create_dashboard()
+    demo.launch(server_port=7866)
